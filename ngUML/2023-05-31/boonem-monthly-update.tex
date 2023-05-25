@@ -1,0 +1,189 @@
+\documentclass{beamer}
+\usetheme{Madrid}
+\usepackage{soul}
+
+
+\title[CRDs for ngUML]{
+    Using Kubernetes operators \& resource definitions
+    for ngUML runtime generation 
+}
+\author{Max Boone}
+\institute{LIACS}
+\date{25th of May 2023}
+
+
+\begin{document}
+
+\frame{\titlepage}
+
+\begin{frame}
+    \frametitle{Contents}
+    \tableofcontents
+\end{frame} 
+
+\section{Situation}
+
+\begin{frame}{Current situation and background}
+    ngUML end-to-end is ``prose(-to-metadata)-to-prototype". 
+    This project focuses on how to get from metadata to prototype,
+    in production.
+
+    \begin{itemize}
+        \item Runtime through code generation
+        \item Generation by \texttt{str.format} templating
+        \item Formatted and structured as Django Application (v3.1) 
+        \item Stored in-tree / in modeler's Django Project
+    \end{itemize}
+\end{frame}
+
+\section{Complications}
+
+\begin{frame}{Complications}
+    \begin{itemize}
+        \item Same directory as main server directory: {
+            \begin{itemize}
+                \item Exceptions bubble up, killing entire system 
+                \item Race conditions, as same thread is utilized
+            \end{itemize}
+        }
+        \item Code generation to flat files: {
+            \begin{itemize}
+                \item Production environments' FS immutable
+                \item Large risk for injection of malicious code
+                \item Migration impractical, as entire system is overwritten
+            \end{itemize} 
+        }
+    \end{itemize}
+\end{frame}
+
+\section{(Research) Question}
+
+\begin{frame}{(Research) Question}
+    Is a CRD-based approach a viable alternative to templated 
+    code generation for the ngUML runtime?
+\end{frame}
+
+\section{Objectives}
+
+\begin{frame}{Objectives}
+    \begin{enumerate}
+        \item Kubernetes Deployment
+        \item Runtime CRDs \& Controller
+        \item Django ORM construction without code generation
+    \end{enumerate}
+\end{frame}
+
+\subsection{Kubernetes Deployment}
+
+\begin{frame}{Objectives}{Kubernetes Deployment}
+    Re-write the current \texttt{docker-compose.yaml} to a
+    helm chart with a \texttt{values.yaml}. Add service
+    account as well.
+
+    ~
+
+    Update \texttt{README.md} with instructions to helm 
+    deploy locally (k3s, minikube, ...). Use \textbf{Gefyra}?
+\end{frame}
+
+\subsection{Runtime CRDs \& Controller}
+
+\begin{frame}{Objectives}{Runtime CRDs \& Controller}
+    \begin{block}{Kubernetes Documentation: Operator Pattern}
+        Operators are software extensions to Kubernetes that make use of custom resources to manage applications and their components. Operators follow Kubernetes principles, notably the control loop.
+    \end{block}
+
+    ~
+
+    Write CRDs for runtime metadata \& runtime configuration. 
+    The custom controller should then build, upgrade or destroy a 
+    runtime (with database) from this definition.
+\end{frame}
+
+\subsection{Django ORM construction}
+
+\begin{frame}{Objectives}{Django ORM construction}
+    Currently, the system generates Python code and stores it
+    as files. We should be able to use the Django ORM without
+    first rendering all metadata as Python code. We can find
+    inspiration for this in \textbf{Baserow}: 
+    the \textbf{SchemaEditor}.
+
+    ~
+
+    \begin{block}{Django Documentation: SchemaEditor}
+        It's unlikely that you will want to interact directly with SchemaEditor as a normal developer using Django, but if you want to write your own migration system, or have more advanced needs, it's a lot nicer than writing SQL.
+    \end{block}
+\end{frame}
+
+\section{Impact \& Risks}
+
+\begin{frame}{Impact \& Risks}
+    \begin{itemize}
+        \item {
+            \textbf{Helm Chart} \\
+            Must ensure no degradation in DX (and 
+            only required iff runtime needed). Will 
+            impact code from all developers. 
+        }
+        \item {
+            \textbf{Runtime CRDs \& Controller} \\
+            Will be written in separate app (orchestrator).
+        }
+        \item {
+            \textbf{Django ORM Construction} \\ 
+            Will be written in separate app (runtime).
+        }
+    \end{itemize}
+\end{frame}
+
+%
+% Dear other students, feel free to use the slides up till here
+% for some structure. Next two slides are not necessary.
+%
+
+\begin{frame}{Something else}{Problem}
+    Currently, the database structure is absurdly complex.
+    We have 43-ish tables to store nodes in a diagram, 
+    node type has it's own table \& django model.
+
+    ~
+
+    \begin{exampleblock}{Polymorphism - What is a chair?}
+        Polymorphism, Jerry! It's like having a closet 
+        full of clothes, but every time you reach for a 
+        shirt, it magically turns into a pair of pants!
+    \end{exampleblock}
+    
+    ~
+
+    Django models don't support polymorphism, 
+    so if you call \texttt{objects.all()} or 
+    \texttt{objects.get(pk={\color{blue}id})} on 
+    \texttt{Classifier} it does not return for 
+    any models that inherit \texttt{Classifier}.
+\end{frame}
+
+\begin{frame}[fragile]{Something else}{What to do?}
+    NoSQL to the rescue. We're not going to fully 
+    implement the abstract structure in a relational 
+    database. Instead: \texttt{JSONField}.
+
+    ~
+
+    However, no validation is {\color{red}dangerous}. Instead,
+    we write JSON Schemas for nodes, extend Django ORM to 
+    use \texttt{pg-jsonschema} and generate type definitions
+    for Python \& TypeScript from the JSON Schemas. 
+
+    ~
+
+    Major change, as all code that directly calls the
+    current classes will need changes. If you stick to 
+    using the internal API, you should be fine. PR must 
+    be non-breaking and requires review from 
+    \textbf{everyone currently working}. Expected in two
+    weeks.
+\end{frame}
+
+\end{document}
